@@ -9,7 +9,6 @@ Parameters:
     MinLength: 8
 
 Resources:
-  # 1. The Network (VPC)
   MyVPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -27,7 +26,6 @@ Resources:
       VpcId: !Ref MyVPC
       InternetGatewayId: !Ref InternetGateway
 
-  # Subnet 1 (Zone A)
   PublicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -36,7 +34,6 @@ Resources:
       MapPublicIpOnLaunch: true
       AvailabilityZone: !Select [ 0, !GetAZs '' ]
 
-  # Subnet 2 (Zone B - REQUIRED for RDS Fix)
   PublicSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
@@ -45,7 +42,6 @@ Resources:
       MapPublicIpOnLaunch: true
       AvailabilityZone: !Select [ 1, !GetAZs '' ]
 
-  # Routing
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties: {VpcId: !Ref MyVPC}
@@ -69,7 +65,6 @@ Resources:
       SubnetId: !Ref PublicSubnet2
       RouteTableId: !Ref PublicRouteTable
 
-  # 2. Security (Firewall)
   WebSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -87,16 +82,12 @@ Resources:
       SecurityGroupIngress:
         - {IpProtocol: tcp, FromPort: 3306, ToPort: 3306, SourceSecurityGroupId: !Ref WebSecurityGroup}
 
-  # 3. Database Subnet Group (THE FIX)
   MyDBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
       DBSubnetGroupDescription: "Group for RDS"
-      SubnetIds: 
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
+      SubnetIds: [!Ref PublicSubnet1, !Ref PublicSubnet2]
 
-  # 4. The Database (RDS)
   MyDatabase:
     Type: AWS::RDS::DBInstance
     Properties:
@@ -107,10 +98,9 @@ Resources:
       MasterUserPassword: !Ref DBPassword
       DBName: student_db
       VPCSecurityGroups: [!Ref DBSecurityGroup]
-      DBSubnetGroupName: !Ref MyDBSubnetGroup  # This links DB to our VPC
+      DBSubnetGroupName: !Ref MyDBSubnetGroup
       PubliclyAccessible: false
 
-  # 5. The Web Server (EC2)
   MyWebServer:
     Type: AWS::EC2::Instance
     Properties:
@@ -128,17 +118,26 @@ Resources:
           cd /var/www/html
           wget https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
           
-          # REPLACE WITH YOUR GITHUB LINK
+          # 1. Download Code from GitHub
+          # REPLACE WITH YOUR LINK
           git clone https://github.com/pevenash/mmu-secure-app.git temp
           mv temp/* .
           rm -rf temp
           
-          echo "DB_HOST=${MyDatabase.Endpoint.Address}" >> /etc/sysconfig/httpd
-          echo "DB_USER=admin" >> /etc/sysconfig/httpd
-          echo "DB_PASS=${DBPassword}" >> /etc/sysconfig/httpd
-          echo "DB_NAME=student_db" >> /etc/sysconfig/httpd
+          # 2. Create the Config File (The Fix)
+          cat > db_config.php <<EOF
+          <?php
+          \$DB_HOST = '${MyDatabase.Endpoint.Address}';
+          \$DB_USER = 'admin';
+          \$DB_PASS = '${DBPassword}';
+          \$DB_NAME = 'student_db';
+          ?>
+          EOF
+          
+          # 3. Fix Permissions and Restart
+          chown -R apache:apache /var/www/html
           systemctl restart httpd
-
+          
 Outputs:
   WebsiteURL:
     Description: "URL of the secure student portal"
